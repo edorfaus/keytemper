@@ -2,14 +2,61 @@
 #include <string.h>
 #include <stdlib.h>
 #include <hidapi.h>
+#include <stdbool.h>
 
 #define DATA_MAX_LENGTH 256
 
-static int start_device(
-	hid_device* dev, unsigned char* read_data, int read_data_len
-)
+static unsigned char parse_print_buf(unsigned char* data, int len)
+{
+	// The TEMPers' keyboard interface uses numbered reports, so the first byte
+	// is the report ID, then comes the report data.
+	// In the report data, the first byte is the modifier bitmask, the second
+	// is reserved (probably all zero), then there's 5 byte of pressed keys.
+	// For the TEMPers, I've only ever seen one key at a time being pressed.
+	
+	if ( len < 2 ) return 0;
+	// Ignore key releases.
+	bool all_zero = ( data[1] == 0 );
+	for ( int i = 3 ; all_zero && i < len ; i++ )
+	{
+		if ( data[i] != 0 )
+		{
+			all_zero = false;
+			break;
+		}
+	}
+	if ( all_zero )
+	{
+		return 0;
+	}
+	// Print all pressed keys
+	printf("(");
+	// Starting with the modifiers
+	if ( data[1] & 0x01 ) printf("C"); if ( data[1] & 0x10 ) printf("c");
+	if ( data[1] & 0x02 ) printf("S"); if ( data[1] & 0x20 ) printf("s");
+	if ( data[1] & 0x04 ) printf("A"); if ( data[1] & 0x40 ) printf("a");
+	if ( data[1] & 0x08 ) printf("W"); if ( data[1] & 0x80 ) printf("w");
+	// Then the pressed keys (if any)
+	unsigned char last = 0;
+	bool first = ( data[1] == 0 );
+	for ( int i = 3 ; i < len ; i++ )
+	{
+		if ( data[i] != 0 )
+		{
+			last = data[i];
+			printf("%s%.2x", first ? "" : " ", data[i]);
+			first = false;
+		}
+	}
+	printf(") ");
+	fflush(stdout);
+	return last;
+}
+
+static int start_device(hid_device* dev, unsigned char* last)
 {
 	unsigned char trigger_data[2] = { 0, 0 };
+	unsigned char read_data[DATA_MAX_LENGTH] = { 0 };
 	printf("Starting device");
 	for ( long write_count = 0; write_count < 50; write_count++ )
 	{
@@ -18,36 +65,79 @@ static int start_device(
 		{
 			printf("\n");
 			fprintf(stderr, "Write to device failed: %ls\n", hid_error(dev));
-			return -5;
+			return 5;
 		}
 		printf(".");
 		fflush(stdout);
 		
-		size = hid_read_timeout(dev, read_data, read_data_len, 100);
+		size = hid_read_timeout(dev, read_data, DATA_MAX_LENGTH, 100);
 		if ( size < 0 )
 		{
 			printf("\n");
 			fprintf(stderr, "Read from device failed: %ls\n", hid_error(dev));
-			return -6;
+			return 6;
 		}
 		else if ( size > 0 )
 		{
 			// TODO: check if this was a device stop rather than start
 			printf(" Device started.\n");
-			if ( size == read_data_len )
+			if ( size == DATA_MAX_LENGTH )
 			{
 				fprintf(
 					stderr,
 					"Warning: data buffer full, may have lost some data.\n\n"
 				);
 			}
-			return size;
+			*last = parse_print_buf(read_data, size);
+			
+			return 0;
 		}
 		// else, size == 0, which means timeout, which means keep going.
 	}
 	printf("\n");
 	fprintf(stderr, "Device still not started after 5 seconds, giving up.\n");
-	return -4;
+	return 4;
+}
+
+static int read_device(hid_device* dev, long read_count, unsigned char* last)
+{
+	unsigned char read_data[DATA_MAX_LENGTH] = { 0 };
+	int timeout = 10000;
+	for ( int cur_count = 0 ; cur_count < read_count ; )
+	{
+		int size = hid_read_timeout(dev, read_data, DATA_MAX_LENGTH, timeout);
+		if ( size < 0 )
+		{
+			fprintf(stderr, "Read from device failed: %ls\n", hid_error(dev));
+			return 6;
+		}
+		else if ( size == 0 )
+		{
+			fprintf(stderr, "Read from device timed out.\n");
+			return 7;
+		}
+		else
+		{
+			if ( size == DATA_MAX_LENGTH )
+			{
+				fprintf(
+					stderr,
+					"Warning: data buffer full, may have lost some data.\n\n"
+				);
+			}
+			unsigned char last_ = parse_print_buf(read_data, size);
+			if ( last != 0 )
+			{
+				*last = last_;
+				if ( last_ == 0x28 )
+				{
+					// Enter was the last key pressed.
+					cur_count++;
+				}
+			}
+		}
+	}
+	return 0;
 }
 
 static int use_device(char* device_path, long read_count)
@@ -59,16 +149,13 @@ static int use_device(char* device_path, long read_count)
 		return 3;
 	}
 	
-	unsigned char read_data[DATA_MAX_LENGTH] = { 0 };
-	int ret = start_device(dev, read_data, DATA_MAX_LENGTH);
+	unsigned char last = 0;
+	int ret = start_device(dev, &last);
 	
-	if ( ret >= 0 )
+	if ( ret == 0 )
 	{
-		// ret is size of read data
-	}
-	else
-	{
-		ret = -ret;
+		ret = read_device(dev, read_count, &last);
+		printf("\n");
 	}
 	
 	hid_close(dev);
