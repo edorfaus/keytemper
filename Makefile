@@ -27,7 +27,8 @@ HIDAPI_LDFLAGS = -L${HIDAPI_LIB_DIR} -Wl,-rpath=${HIDAPI_LIB_DIR} -l${HIDAPI_LIB
 all: keytemper
 
 keytemper: LDFLAGS += ${HIDAPI_LDFLAGS}
+keytemper: keymap.o
 
 .PHONY: clean
 clean:
-	${RM} keytemper
+	${RM} keytemper keymap.o

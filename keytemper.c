@@ -3,53 +3,45 @@
 #include <stdlib.h>
 #include <hidapi.h>
 #include <stdbool.h>
+#include "keymap.h"
 
 #define DATA_MAX_LENGTH 256
+
+#define USE_NUMBERED_REPORTS
 
 static unsigned char parse_print_buf(unsigned char* data, int len)
 {
 	// The TEMPers' keyboard interface uses numbered reports, so the first byte
 	// is the report ID, then comes the report data.
 	// In the report data, the first byte is the modifier bitmask, the second
-	// is reserved (probably all zero), then there's 5 byte of pressed keys.
-	// For the TEMPers, I've only ever seen one key at a time being pressed.
+	// is reserved (probably all zero), then there's 5 bytes of pressed keys.
+	// For the TEMPers, I've only ever seen one key at a time being pressed,
+	// and it doesn't rely on key repeat, so I completely ignore releases.
 	
-	if ( len < 2 ) return 0;
-	// Ignore key releases.
-	bool all_zero = ( data[1] == 0 );
-	for ( int i = 3 ; all_zero && i < len ; i++ )
-	{
-		if ( data[i] != 0 )
-		{
-			all_zero = false;
-			break;
-		}
-	}
-	if ( all_zero )
+	#ifdef USE_NUMBERED_REPORTS
+	const int ofs = 1;
+	#else
+	const int ofs = 0;
+	#endif
+	
+	if ( len <= ofs )
 	{
 		return 0;
 	}
-	// Print all pressed keys
-	printf("(");
-	// Starting with the modifiers
-	if ( data[1] & 0x01 ) printf("C"); if ( data[1] & 0x10 ) printf("c");
-	if ( data[1] & 0x02 ) printf("S"); if ( data[1] & 0x20 ) printf("s");
-	if ( data[1] & 0x04 ) printf("A"); if ( data[1] & 0x40 ) printf("a");
-	if ( data[1] & 0x08 ) printf("W"); if ( data[1] & 0x80 ) printf("w");
-	// Then the pressed keys (if any)
-	unsigned char last = 0;
-	bool first = ( data[1] == 0 );
-	for ( int i = 3 ; i < len ; i++ )
+	unsigned char modifiers = data[ofs], last = 0;
+	for ( int i = ofs+2 ; i < len ; i++ )
 	{
 		if ( data[i] != 0 )
 		{
 			last = data[i];
-			printf("%s%.2x", first ? "" : " ", data[i]);
-			first = false;
+			char character = get_char_for_key(modifiers, last);
+			if ( character != '\0' )
+			{
+				printf("%c", character);
+				fflush(stdout);
+			}
 		}
 	}
-	printf(")%s", last == 0x28 ? "\n" : " ");
-	fflush(stdout);
 	return last;
 }
 
