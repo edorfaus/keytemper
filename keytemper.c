@@ -48,7 +48,7 @@ static unsigned char parse_print_buf(unsigned char* data, int len)
 			first = false;
 		}
 	}
-	printf(") ");
+	printf(")%s", last == 0x28 ? "\n" : " ");
 	fflush(stdout);
 	return last;
 }
@@ -58,7 +58,7 @@ static int start_device(hid_device* dev, unsigned char* last)
 	unsigned char trigger_data[2] = { 0, 0 };
 	unsigned char read_data[DATA_MAX_LENGTH] = { 0 };
 	printf("Starting device");
-	for ( long write_count = 0; write_count < 50; write_count++ )
+	for ( int write_count = 0; write_count < 100; write_count++ )
 	{
 		int size = hid_write(dev, trigger_data, sizeof(trigger_data));
 		if ( size <= 0 )
@@ -70,7 +70,7 @@ static int start_device(hid_device* dev, unsigned char* last)
 		printf(".");
 		fflush(stdout);
 		
-		size = hid_read_timeout(dev, read_data, DATA_MAX_LENGTH, 100);
+		size = hid_read_timeout(dev, read_data, DATA_MAX_LENGTH, 0);
 		if ( size < 0 )
 		{
 			printf("\n");
@@ -80,7 +80,7 @@ static int start_device(hid_device* dev, unsigned char* last)
 		else if ( size > 0 )
 		{
 			// TODO: check if this was a device stop rather than start
-			printf(" Device started.\n");
+			printf(" Device started after %i writes.\n", write_count + 1);
 			if ( size == DATA_MAX_LENGTH )
 			{
 				fprintf(
@@ -95,7 +95,7 @@ static int start_device(hid_device* dev, unsigned char* last)
 		// else, size == 0, which means timeout, which means keep going.
 	}
 	printf("\n");
-	fprintf(stderr, "Device still not started after 5 seconds, giving up.\n");
+	fprintf(stderr, "Device failed to start, giving up.\n");
 	return 4;
 }
 
@@ -145,7 +145,7 @@ static int stop_device(hid_device* dev, unsigned char* last)
 	unsigned char trigger_data[2] = { 0, 0 };
 	unsigned char read_data[DATA_MAX_LENGTH] = { 0 };
 	printf("Stopping device");
-	for ( long write_count = 0; write_count < 50; write_count++ )
+	for ( int write_count = 0; write_count < 100; write_count++ )
 	{
 		int size = hid_write(dev, trigger_data, sizeof(trigger_data));
 		if ( size <= 0 )
@@ -157,7 +157,7 @@ static int stop_device(hid_device* dev, unsigned char* last)
 		printf(".");
 		fflush(stdout);
 		
-		size = hid_read_timeout(dev, read_data, DATA_MAX_LENGTH, 100);
+		size = hid_read_timeout(dev, read_data, DATA_MAX_LENGTH, 0);
 		if ( size < 0 )
 		{
 			printf("\n");
@@ -169,7 +169,7 @@ static int stop_device(hid_device* dev, unsigned char* last)
 			unsigned char cur = parse_print_buf(read_data, size);
 			if ( cur == 0x28 && *last == 0x28 )
 			{
-				printf(" Device stopped.\n");
+				printf(" Device stopped after %i writes.\n", write_count + 1);
 				return 0;
 			}
 			if ( cur != 0 )
@@ -187,7 +187,7 @@ static int stop_device(hid_device* dev, unsigned char* last)
 		// else, size == 0, which means timeout, which means keep going.
 	}
 	printf("\n");
-	fprintf(stderr, "Device still not stopped after 5 seconds, giving up.\n");
+	fprintf(stderr, "Device failed to acknowledge stop, giving up.\n");
 	return 4;
 }
 
