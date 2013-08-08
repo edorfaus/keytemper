@@ -125,11 +125,11 @@ static int read_device(hid_device* dev, long read_count, unsigned char* last)
 					"Warning: data buffer full, may have lost some data.\n\n"
 				);
 			}
-			unsigned char last_ = parse_print_buf(read_data, size);
-			if ( last != 0 )
+			unsigned char cur = parse_print_buf(read_data, size);
+			if ( cur != 0 )
 			{
-				*last = last_;
-				if ( last_ == 0x28 )
+				*last = cur;
+				if ( cur == 0x28 )
 				{
 					// Enter was the last key pressed.
 					cur_count++;
@@ -138,6 +138,57 @@ static int read_device(hid_device* dev, long read_count, unsigned char* last)
 		}
 	}
 	return 0;
+}
+
+static int stop_device(hid_device* dev, unsigned char* last)
+{
+	unsigned char trigger_data[2] = { 0, 0 };
+	unsigned char read_data[DATA_MAX_LENGTH] = { 0 };
+	printf("Stopping device");
+	for ( long write_count = 0; write_count < 50; write_count++ )
+	{
+		int size = hid_write(dev, trigger_data, sizeof(trigger_data));
+		if ( size <= 0 )
+		{
+			printf("\n");
+			fprintf(stderr, "Write to device failed: %ls\n", hid_error(dev));
+			return 5;
+		}
+		printf(".");
+		fflush(stdout);
+		
+		size = hid_read_timeout(dev, read_data, DATA_MAX_LENGTH, 100);
+		if ( size < 0 )
+		{
+			printf("\n");
+			fprintf(stderr, "Read from device failed: %ls\n", hid_error(dev));
+			return 6;
+		}
+		else if ( size > 0 )
+		{
+			unsigned char cur = parse_print_buf(read_data, size);
+			if ( cur == 0x28 && *last == 0x28 )
+			{
+				printf(" Device stopped.\n");
+				return 0;
+			}
+			if ( cur != 0 )
+			{
+				*last = cur;
+			}
+			if ( size == DATA_MAX_LENGTH )
+			{
+				fprintf(
+					stderr,
+					"Warning: data buffer full, may have lost some data.\n\n"
+				);
+			}
+		}
+		// else, size == 0, which means timeout, which means keep going.
+	}
+	printf("\n");
+	fprintf(stderr, "Device still not stopped after 5 seconds, giving up.\n");
+	return 4;
 }
 
 static int use_device(char* device_path, long read_count)
@@ -156,6 +207,11 @@ static int use_device(char* device_path, long read_count)
 	{
 		ret = read_device(dev, read_count, &last);
 		printf("\n");
+		int ret2 = stop_device(dev, &last);
+		if ( ret == 0 )
+		{
+			ret = ret2;
+		}
 	}
 	
 	hid_close(dev);
